@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinuitreeview"
+version = "0.1.0"
+description = "tinui高级树状图"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Smart-Space", email = "smart-space@qq.com"},
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "tinui",
+]
+
+[tool.setuptools]
+packages = ["tinuitreeview"]
+
+[project.urls]
+Repository = "https://github.com/Smart-Space/TinUITreeview"
