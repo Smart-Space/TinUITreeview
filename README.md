@@ -80,6 +80,14 @@ TinUITreeView(
 
 同原生`treeview`。
 
+#### bind(sequence=None, func=None, add=None)
+
+控件事件绑定，返回`funcid`。
+
+#### unbind(sequence, funcid=None)
+
+控件事件解绑。
+
 ---
 
 # 示例

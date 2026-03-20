@@ -263,6 +263,14 @@ class TinUITreeView:
         for item in list(self._item_map.values()):
             if item.sign and self._box.itemcget(item.sign, "text") == self._ICON_CLOSED:
                 self._open_view(item)
+    
+    def bind(self, sequence=None, func=None, add=None):
+        """绑定事件，代理给画布实现"""
+        return self._box.bind(sequence, func, add)
+    
+    def unbind(self, sequence, funcid=None):
+        """解绑事件，代理给画布实现"""
+        self._box.unbind(sequence, funcid)
 
     # ====================
     # 初始化加载
@@ -587,7 +595,7 @@ class TinUITreeView:
 
 if __name__ == "__main__":
     from tinui import ExpandPanel
-    def test(path):
+    def test(path: list[TinUITreeItem]):
         print("选中路径:", " > ".join(n.text for n in path))
 
     root = tk.Tk()
@@ -598,6 +606,9 @@ if __name__ == "__main__":
     # 增
     new_item = tree.add_node("新节点") # 添加到根
     child = tree.add_node("子节点", parent=new_item)  # 添加到指定节点下
+    for i in range(5):
+        tree.add_node(f"子节点{i}", parent=child)
+    print(child.children[-1].parent, child)
     
     # 删
     # tree.remove_node(child) # 同时删除所有后代，父节点若变为空则自动降级为叶节点
