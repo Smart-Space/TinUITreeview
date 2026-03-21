@@ -170,20 +170,23 @@ class TinUITreeView:
     ) -> TinUITreeItem:
         """
         添加一个新节点。
-          parent=None -> 追加到根级
-          parent=item -> 作为 item 的子节点追加
+          parent=None -> 追加到根级（画布末尾）
+          parent=item -> 作为 item 的子节点追加，插入到该父节点子树末尾的正下方
 
         返回新建的 TinUITreeItem
         """
         padx = self._calc_padx(parent)
-        item = self._create_leaf(text, padx, parent)
 
         if parent is None:
+            # 根级：直接追加到画布末尾，insert_after=None
+            item = self._create_leaf(text, padx, parent, insert_after=None)
             self._roots.append(item)
         else:
+            # 找到父节点子树中最后一个节点，新节点插入其正下方
+            last_node = self._get_last_node(parent)
+            item = self._create_leaf(text, padx, parent, insert_after=last_node)
             self._make_parent_expandable(parent)
             parent.children.append(item)
-            self._update_items_dict(parent)
 
         self._fix_back_width(item.back)
         self._bind_events(item)
@@ -195,48 +198,40 @@ class TinUITreeView:
         删除节点及其所有后代
         若被删节点是父节点的最后一个子节点，同时移除父节点的折叠图标
         """
-        # 收集所有需要删除的节点（包含后代）
         to_delete = self._collect_descendants(item)
         to_delete.insert(0, item)
 
-        # 计算需要向上移动的高度
-        bbox_list = [self._box.bbox(n.back) for n in to_delete if self._box.bbox(n.back) is not None]
-        if bbox_list:
-            total_h = sum(b[3] - b[1] + 3 for b in bbox_list)
-            # 找到第一个被删节点在所有节点中的索引
-            all_backs = list(self._item_map.keys())
-            first_idx = all_backs.index(item.back) if item.back in all_backs else None
-        else:
-            total_h = 0
-            first_idx = None
+        # 记录删除前在 _item_map 中的起始索引
+        all_backs = list(self._item_map.keys())
+        first_idx = all_backs.index(item.back) if item.back in all_backs else None
 
-        # 从画布移除
+        # 计算被删节点占用的总高度（仅统计可见节点）
+        total_h = 0
+        for node in to_delete:
+            bbox = self._box.bbox(node.back)
+            if bbox is not None:
+                total_h += bbox[3] - bbox[1] + 3
+
+        # 从画布和查找表移除
         for node in to_delete:
             for cid in self._canvas_ids(node):
                 self._box.delete(cid)
-            del self._item_map[node.back]
+            self._item_map.pop(node.back, None)
 
-        # 整体上移后续节点
-        if first_idx is not None:
+        # 将被删区域之后的节点整体上移
+        if first_idx is not None and total_h > 0:
             remaining_backs = list(self._item_map.keys())
-            # 找到删除后第一个需要上移的 back
-            for _, back in enumerate(remaining_backs):
+            for back in remaining_backs[first_idx:]:
                 node_item = self._item_map[back]
-                # 仅移动位置在删除区域之后的节点
-                b = self._box.bbox(back)
-                if b and bbox_list and b[1] >= bbox_list[0][1]:
-                    for cid in self._canvas_ids(node_item):
-                        self._box.move(cid, 0, -total_h)
+                for cid in self._canvas_ids(node_item):
+                    self._box.move(cid, 0, -total_h)
 
         # 修正父节点
         parent = item.parent
         if parent is not None:
             parent.children = [c for c in parent.children if c is not item]
             if not parent.children:
-                # 父节点变为叶节点，移除折叠图标
                 self._demote_to_leaf(parent)
-            else:
-                self._update_items_dict(parent)
         else:
             self._roots = [r for r in self._roots if r is not item]
 
@@ -276,18 +271,17 @@ class TinUITreeView:
     # 初始化加载
     # ====================
 
-    def _load_content(self, content, parent: "TinUITreeItem | None" = None, padx=5):
-        """递归解析原始 content 格式并构建节点树。"""
+    def _load_content(self, content, parent: TinUITreeItem|None = None, padx=5):
+        """递归解析原始 content 格式并构建节点树"""
         children: list[TinUITreeItem] = []
         for text in content:
             if isinstance(text, str):
-                item = self._create_leaf(text, padx, parent)
+                item = self._create_leaf(text, padx, parent, insert_after=None)
             else:
                 # (label, (child1, child2, ...))
-                item = self._create_branch(text[0], padx, parent)
+                item = self._create_branch(text[0], padx, parent, insert_after=None)
                 self._load_content(text[1], item, padx + 15)
-                self._update_items_dict(item)
-                # 默认折叠图标绑定
+                # 折叠图标绑定
                 self._box.tag_bind(
                     item.sign, "<Button-1>",
                     lambda _, n=item: self._close_view(n),
@@ -301,19 +295,57 @@ class TinUITreeView:
         else:
             parent.children = children
 
-    def _create_leaf(self, text: str, padx: int, parent) -> TinUITreeItem:
-        y = self._endy() + 3
+    def _calc_insert_y(self, insert_after: TinUITreeItem|None) -> int:
+        """
+        计算新节点应绘制的 Y 坐标。
+          insert_after=None -> 追加到画布末尾: _endy()
+          insert_after=node -> 插入到该节点 bbox 底部的正下方，
+                               同时将该节点之后的所有现有节点向下移动一行
+        返回 (y, insert_index)：Y坐标，在 _item_map 中的插入位置索引
+        """
+        if insert_after is None:
+            return self._endy() + 3, len(self._item_map)
+
+        bbox = self._box.bbox(insert_after.back)
+        if bbox is None:
+            return self._endy() + 3, len(self._item_map)
+
+        insert_y = bbox[3] + 3          # 紧接在 insert_after 下方
+        row_h    = bbox[3] - bbox[1] -1 # 预估新节点高度（与 insert_after 同高）
+
+        # 找到 insert_after 在 _item_map 中的索引，新节点插入其后
+        all_backs = list(self._item_map.keys())
+        insert_index = all_backs.index(insert_after.back) + 1
+
+        # 把该位置之后的所有节点向下移动一行
+        for back in all_backs[insert_index:]:
+            node = self._item_map[back]
+            for cid in self._canvas_ids(node):
+                self._box.move(cid, 0, row_h)
+
+        return insert_y, insert_index
+
+    def _insert_into_map(self, back, item: TinUITreeItem, insert_index: int):
+        """在 _item_map 的指定位置插入新条目（保持有序）"""
+        items = list(self._item_map.items())
+        items.insert(insert_index, (back, item))
+        self._item_map = dict(items)
+
+    def _create_leaf(self, text: str, padx: int, parent,
+                     insert_after: TinUITreeItem|None = None) -> TinUITreeItem:
+        y, insert_index = self._calc_insert_y(insert_after)
         te = self._box.create_text(
             (padx + 15, y), text=text,
             font=self._font, fill=self._fg, tags="item", anchor="nw",
         )
         back = self._box.add_back((), (te,), fg=self._bg, bg=self._bg, linew=0)
         item = TinUITreeItem(text, back, te, sign=None, parent=parent)
-        self._item_map[back] = item
+        self._insert_into_map(back, item, insert_index)
         return item
 
-    def _create_branch(self, text: str, padx: int, parent) -> TinUITreeItem:
-        y = self._endy() + 3
+    def _create_branch(self, text: str, padx: int, parent,
+                       insert_after: TinUITreeItem|None = None) -> TinUITreeItem:
+        y, insert_index = self._calc_insert_y(insert_after)
         sign = self._box.create_text(
             (padx - 1, y + 3), text=self._ICON_OPEN,
             font=f"{{Segoe Fluent Icons}} {self._font_size}",
@@ -326,7 +358,7 @@ class TinUITreeView:
         )
         back = self._box.add_back((), (sign, te), fg=self._bg, bg=self._bg, linew=0)
         item = TinUITreeItem(text, back, te, sign=sign, parent=parent)
-        self._item_map[back] = item
+        self._insert_into_map(back, item, insert_index)
         return item
 
     # ====================
@@ -478,6 +510,11 @@ class TinUITreeView:
         desc = self._collect_descendants(item)
         return desc[-1].back if desc else item.back
 
+    def _get_last_node(self, item: TinUITreeItem) -> TinUITreeItem:
+        """获取以 item 为根的子树中最后一个后代节点，用于确定插入锚点"""
+        desc = self._collect_descendants(item)
+        return desc[-1] if desc else item
+
     def _move_index(self, index: int, dy: int):
         """将 item_map 中第 index 个之后的所有节点整体移动 dy"""
         all_backs = list(self._item_map.keys())
@@ -608,7 +645,12 @@ if __name__ == "__main__":
     child = tree.add_node("子节点", parent=new_item)  # 添加到指定节点下
     for i in range(5):
         tree.add_node(f"子节点{i}", parent=child)
-    print(child.children[-1].parent, child)
+
+    two = tree._roots[1]  # 获取第二个根节点 "two"
+    for i in range(3):
+        tree.add_node(f"two的子{i}", parent=two)
+    three = tree._roots[2]  # 获取第三个根节点 "three"
+    tree.add_node("three的子", parent=three)
     
     # 删
     # tree.remove_node(child) # 同时删除所有后代，父节点若变为空则自动降级为叶节点
