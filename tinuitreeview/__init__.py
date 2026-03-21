@@ -96,6 +96,7 @@ class TinUITreeView:
         self._roots: list[TinUITreeItem] = [] # 根节点列表
         # back_id->TinUITreeItem的全局查找表
         self._item_map: dict[object, TinUITreeItem] = {}
+        self._order_list: list[object] = [] # back_id的有序列表，用于计算插入位置
 
         self._box = BasicTinUI(master, bg=bg, width=width, height=height)
         self._cavui = master.create_window(
@@ -201,27 +202,24 @@ class TinUITreeView:
         to_delete = self._collect_descendants(item)
         to_delete.insert(0, item)
 
-        # 记录删除前在 _item_map 中的起始索引
-        all_backs = list(self._item_map.keys())
-        first_idx = all_backs.index(item.back) if item.back in all_backs else None
+        # 记录删除前在 _order_list 中的起始索引
+        first_idx = self._order_list.index(item.back) if item.back in self._order_list else None
 
         # 计算被删节点占用的总高度（仅统计可见节点）
         total_h = 0
         for node in to_delete:
             bbox = self._box.bbox(node.back)
             if bbox is not None:
-                total_h += bbox[3] - bbox[1] + 3
-
-        # 从画布和查找表移除
-        for node in to_delete:
+                total_h += bbox[3] - bbox[1] - 1
             for cid in self._canvas_ids(node):
                 self._box.delete(cid)
             self._item_map.pop(node.back, None)
+            self._order_list.remove(node.back)
 
         # 将被删区域之后的节点整体上移
+        # total_h -= 4 # 最后一个节点下方多算了一个间距，减去
         if first_idx is not None and total_h > 0:
-            remaining_backs = list(self._item_map.keys())
-            for back in remaining_backs[first_idx:]:
+            for back in self._order_list[first_idx:]:
                 node_item = self._item_map[back]
                 for cid in self._canvas_ids(node_item):
                     self._box.move(cid, 0, -total_h)
@@ -301,24 +299,23 @@ class TinUITreeView:
           insert_after=None -> 追加到画布末尾: _endy()
           insert_after=node -> 插入到该节点 bbox 底部的正下方，
                                同时将该节点之后的所有现有节点向下移动一行
-        返回 (y, insert_index)：Y坐标，在 _item_map 中的插入位置索引
+        返回 (y, insert_index)：Y坐标，在 _order_list 中的插入位置索引
         """
         if insert_after is None:
-            return self._endy() + 3, len(self._item_map)
+            return self._endy() + 3, len(self._order_list)
 
         bbox = self._box.bbox(insert_after.back)
         if bbox is None:
-            return self._endy() + 3, len(self._item_map)
+            return self._endy() + 3, len(self._order_list)
 
         insert_y = bbox[3] + 3          # 紧接在 insert_after 下方
-        row_h    = bbox[3] - bbox[1] -1 # 预估新节点高度（与 insert_after 同高）
+        row_h    = bbox[3] - bbox[1] -1 # 预估新节点高度与 insert_after 同高
 
-        # 找到 insert_after 在 _item_map 中的索引，新节点插入其后
-        all_backs = list(self._item_map.keys())
-        insert_index = all_backs.index(insert_after.back) + 1
+        # 找到 insert_after 在 _order_list 中的索引，新节点插入其后
+        insert_index = self._order_list.index(insert_after.back) + 1
 
         # 把该位置之后的所有节点向下移动一行
-        for back in all_backs[insert_index:]:
+        for back in self._order_list[insert_index:]:
             node = self._item_map[back]
             for cid in self._canvas_ids(node):
                 self._box.move(cid, 0, row_h)
@@ -327,9 +324,8 @@ class TinUITreeView:
 
     def _insert_into_map(self, back, item: TinUITreeItem, insert_index: int):
         """在 _item_map 的指定位置插入新条目（保持有序）"""
-        items = list(self._item_map.items())
-        items.insert(insert_index, (back, item))
-        self._item_map = dict(items)
+        self._item_map[back] = item
+        self._order_list.insert(insert_index, back)
 
     def _create_leaf(self, text: str, padx: int, parent,
                      insert_after: TinUITreeItem|None = None) -> TinUITreeItem:
@@ -338,7 +334,7 @@ class TinUITreeView:
             (padx + 15, y), text=text,
             font=self._font, fill=self._fg, tags="item", anchor="nw",
         )
-        back = self._box.add_back((), (te,), fg=self._bg, bg=self._bg, linew=0)
+        back = self._box.add_back((), (te,), fg=self._bg, bg=self._bg)
         item = TinUITreeItem(text, back, te, sign=None, parent=parent)
         self._insert_into_map(back, item, insert_index)
         return item
@@ -356,7 +352,7 @@ class TinUITreeView:
             (signx, y), text=text,
             font=self._font, fill=self._fg, tags="item", anchor="nw",
         )
-        back = self._box.add_back((), (sign, te), fg=self._bg, bg=self._bg, linew=0)
+        back = self._box.add_back((), (sign, te), fg=self._bg, bg=self._bg)
         item = TinUITreeItem(text, back, te, sign=sign, parent=parent)
         self._insert_into_map(back, item, insert_index)
         return item
@@ -383,7 +379,7 @@ class TinUITreeView:
             self._box.dtag(move_tag)
             return
         last_leaf_back = self._get_last_back(item)
-        index = list(self._item_map.keys()).index(last_leaf_back) + 1
+        index = self._order_list.index(last_leaf_back) + 1
         self._move_index(index, bbox[3] - bbox[1])
         self._box.dtag(move_tag)
 
@@ -412,7 +408,7 @@ class TinUITreeView:
             return
         self._box.itemconfig(move_tag, state="hidden")
         last_desc_back = desc[-1].back if desc else item.back
-        index = list(self._item_map.keys()).index(last_desc_back) + 1
+        index = self._order_list.index(last_desc_back) + 1
         self._move_index(index, bbox[1] - bbox[3])
         self._box.dtag(move_tag)
 
@@ -517,8 +513,7 @@ class TinUITreeView:
 
     def _move_index(self, index: int, dy: int):
         """将 item_map 中第 index 个之后的所有节点整体移动 dy"""
-        all_backs = list(self._item_map.keys())
-        for back in all_backs[index:]:
+        for back in self._order_list[index:]:
             node = self._item_map[back]
             for cid in self._canvas_ids(node):
                 self._box.move(cid, 0, dy)
@@ -653,7 +648,7 @@ if __name__ == "__main__":
     tree.add_node("three的子", parent=three)
     
     # 删
-    # tree.remove_node(child) # 同时删除所有后代，父节点若变为空则自动降级为叶节点
+    tree.remove_node(three.children[2]) # 同时删除所有后代，父节点若变为空则自动降级为叶节点
     
     # 改
     tree.rename_node(new_item, "renamed")
