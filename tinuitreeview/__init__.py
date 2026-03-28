@@ -87,6 +87,7 @@ class TinUITreeView:
         self._height = height
         self._anchor = anchor
         self._command = command
+        self.scale_value = master.scale_value
 
         _font = tkfont.Font(font=font)
         self._font      = _font
@@ -99,6 +100,7 @@ class TinUITreeView:
         self._order_list: list[object] = [] # back_id的有序列表，用于计算插入位置
 
         self._box = BasicTinUI(master, bg=bg, width=width, height=height)
+        self._box.set_scale(self._master.TINUISCALE)
         self._cavui = master.create_window(
             pos, window=self._box, width=width, height=height, anchor="nw"
         )
@@ -130,17 +132,17 @@ class TinUITreeView:
             bbox = self._box.bbox(first_back)
             self._linew = bbox[3] - bbox[1]
         else:
-            self._linew = 20
+            self._linew = self.scale_value(20)
         self._line = self._box.create_line(
-            (1, self._linew / 3, 1, self._linew * 2 / 3),
-            fill=oncolor, width=3, capstyle="round",
+            (self.scale_value(1), self._linew / 3, self.scale_value(1), self._linew * 2 / 3),
+            fill=oncolor, width=self.scale_value(3,True), capstyle="round",
         )
         self._box.moveto(self._line, 0, -self._linew - height)
         self._box.itemconfig(self._line, state="hidden")
 
         x1, y1, x2, y2 = master.bbox(self.uid)
         self._allback = master._BasicTinUI__ui_polygon(
-            ((x1, y1), (x2, y2)), outline=bg, fill=bg, width=9, tags=self.uid
+            ((x1, y1), (x2, y2)), outline=bg, fill=bg, width=self._master.TINUI_RADIUS_SMALL, tags=self.uid
         )
 
         master.lift(self._cavui)
@@ -278,7 +280,7 @@ class TinUITreeView:
             else:
                 # (label, (child1, child2, ...))
                 item = self._create_branch(text[0], padx, parent, insert_after=None)
-                self._load_content(text[1], item, padx + 15)
+                self._load_content(text[1], item, padx + self.scale_value(15))
                 # 折叠图标绑定
                 self._box.tag_bind(
                     item.sign, "<Button-1>",
@@ -302,14 +304,14 @@ class TinUITreeView:
         返回 (y, insert_index)：Y坐标，在 _order_list 中的插入位置索引
         """
         if insert_after is None:
-            return self._endy() + 3, len(self._order_list)
+            return self._endy() + self.scale_value(3), len(self._order_list)
 
         bbox = self._box.bbox(insert_after.back)
         if bbox is None:
-            return self._endy() + 3, len(self._order_list)
+            return self._endy() + self.scale_value(3), len(self._order_list)
 
-        insert_y = bbox[3] + 3          # 紧接在 insert_after 下方
-        row_h    = bbox[3] - bbox[1] -1 # 预估新节点高度与 insert_after 同高
+        insert_y = bbox[3] + self.scale_value(3)          # 紧接在 insert_after 下方
+        row_h    = bbox[3] - bbox[1] - self.scale_value(1) # 预估新节点高度与 insert_after 同高
 
         # 找到 insert_after 在 _order_list 中的索引，新节点插入其后
         insert_index = self._order_list.index(insert_after.back) + 1
@@ -331,7 +333,7 @@ class TinUITreeView:
                      insert_after: TinUITreeItem|None = None) -> TinUITreeItem:
         y, insert_index = self._calc_insert_y(insert_after)
         te = self._box.create_text(
-            (padx + 15, y), text=text,
+            (padx + self.scale_value(15), y), text=text,
             font=self._font, fill=self._fg, tags="item", anchor="nw",
         )
         back = self._box.add_back((), (te,), fg=self._bg, bg=self._bg)
@@ -343,7 +345,7 @@ class TinUITreeView:
                        insert_after: TinUITreeItem|None = None) -> TinUITreeItem:
         y, insert_index = self._calc_insert_y(insert_after)
         sign = self._box.create_text(
-            (padx - 1, y + 3), text=self._ICON_OPEN,
+            (padx - self.scale_value(1), y + self.scale_value(3)), text=self._ICON_OPEN,
             font=f"{{Segoe Fluent Icons}} {self._font_size}",
             fill=self._signcolor, anchor="nw",
         )
@@ -434,7 +436,7 @@ class TinUITreeView:
             self._box.itemconfig(self._line, state="hidden")
             return
         self._box.itemconfig(self._line, state="normal")
-        self._box.moveto(self._line, -1, posi[1] + self._linew / 5)
+        self._box.moveto(self._line, -self.scale_value(1), posi[1] + self._linew / 5)
         if self._command is not None and send:
             path = []
             node = item
@@ -521,10 +523,10 @@ class TinUITreeView:
     def _fix_back_width(self, back):
         """调整背景矩形宽度以填满视口"""
         old_coords = self._box.coords(back)
-        old_coords[0] = old_coords[6] = 6
+        old_coords[0] = old_coords[6] = self.scale_value(6)
         bbox = self._box.bbox(back)
         if bbox and bbox[2] - bbox[0] < self._width:
-            old_coords[2] = old_coords[4] = self._width - 9
+            old_coords[2] = old_coords[4] = self._width - self._master.TINUI_RADIUS_SMALL
         self._box.coords(back, old_coords)
 
     def _update_items_dict(self, parent: TinUITreeItem):
@@ -540,9 +542,9 @@ class TinUITreeView:
         # 获取父节点文字的当前坐标
         te_coords = self._box.coords(parent.te)
         padx = self._calc_padx(parent.parent)  # 图标在文字左侧
-        y = te_coords[1] + 3
+        y = te_coords[1] + self.scale_value(3)
         sign = self._box.create_text(
-            (padx - 1, y), text=self._ICON_OPEN,
+            (padx - self.scale_value(1), y), text=self._ICON_OPEN,
             font=f"{{Segoe Fluent Icons}} {self._font_size}",
             fill=self._signcolor, anchor="nw",
         )
@@ -572,13 +574,13 @@ class TinUITreeView:
             self._master.itemconfig(self._cavui, height=self._height)
             self._master.itemconfig(self._vscroll, state="hidden")
         else:
-            self._master.itemconfig(self._cavui, height=self._height - 8)
+            self._master.itemconfig(self._cavui, height=self._height - self.scale_value(8))
             self._master.itemconfig(self._vscroll, state="normal")
         if bbox[3] - bbox[1] <= self._height:
             self._master.itemconfig(self._cavui, width=self._width)
             self._master.itemconfig(self._hscroll, state="hidden")
         else:
-            self._master.itemconfig(self._cavui, width=self._width - 8)
+            self._master.itemconfig(self._cavui, width=self._width - self.scale_value(8))
             self._master.itemconfig(self._hscroll, state="normal")
         self._box.config(scrollregion=bbox)
 
@@ -586,7 +588,7 @@ class TinUITreeView:
         bbox = self._box.bbox("item")
         if bbox is None:
             return
-        widgetwidth = max(self._width, bbox[2]) - 9
+        widgetwidth = max(self._width, bbox[2]) - self._master.TINUI_RADIUS_SMALL
         for back in self._item_map:
             old_coords = self._box.coords(back)
             old_coords[2] = old_coords[4] = widgetwidth
@@ -600,10 +602,10 @@ class TinUITreeView:
             self._vscroll.move(dx, dy, self._width)
         else:
             dx, dy = master._BasicTinUI__auto_layout(self.uid, (x1, y1, x2, y2), "nw")  # type: ignore
-            width2  = x2 - x1 - 9
+            width2  = x2 - x1 - self.scale_value(9)
             dw = width2 - self._width
             self._width = width2
-            height2 = y2 - y1 - 9
+            height2 = y2 - y1 - self.scale_value(9)
             dh = height2 - self._height
             self._height = height2
             master.move(self._hscroll, dw, 0)
@@ -612,8 +614,8 @@ class TinUITreeView:
             self._vscroll.move(dx, dy + dh, self._width)
             if self._allback is not None:
                 coord = master.coords(self._allback)
-                coord[2] = coord[4] = x2 - 4
-                coord[5] = coord[7] = y2 - 4
+                coord[2] = coord[4] = x2 - self.scale_value(4)
+                coord[5] = coord[7] = y2 - self.scale_value(4)
                 master.coords(self._allback, coord)
             master.itemconfig(self._cavui, width=self._width, height=self._height)
             self._repaintback()
@@ -627,13 +629,17 @@ class TinUITreeView:
 
 if __name__ == "__main__":
     from tinui import ExpandPanel
+    # from ctypes import windll
+    # windll.shcore.SetProcessDpiAwareness(2)  # DPI感知，解决高DPI显示模糊问题
+    # factor = windll.shcore.GetScaleFactorForDevice(0) / 100
     def test(path: list[TinUITreeItem]):
         print("选中路径:", " > ".join(n.text for n in path))
 
     root = tk.Tk()
     tinui = BasicTinUI(root)
+    # tinui.set_scale(factor)
     tinui.pack(fill='both',expand=True)
-    tree = TinUITreeView(tinui, (50, 50), command=test)
+    tree = TinUITreeView(tinui, (50, 50), command=test, **tvdark)
 
     # 增
     new_item = tree.add_node("新节点") # 添加到根
@@ -661,7 +667,7 @@ if __name__ == "__main__":
     tree.close_all()
     root.after(2000, tree.open_all) # 2秒后展开所有节点
 
-    rp = ExpandPanel(tinui, tree.uid)
+    rp = ExpandPanel(tinui, tree.uid, (10,10,10,10))
     def on_resize(e):
         rp.update_layout(5, 5, e.width-5, e.height-5)
     tinui.bind("<Configure>", on_resize)
