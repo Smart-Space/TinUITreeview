@@ -10,6 +10,7 @@ TinUITreeView — 基于原 add_treeview 重构的面向对象树状列表控件
 """
 import tkinter as tk
 import tkinter.font as tkfont
+import weakref
 from tinui import BasicTinUI
 from tinui.TinUI import TinUIString
 
@@ -32,8 +33,14 @@ class TinUITreeItem:
         self.back = back          # 背景
         self.te = te              # 文字
         self.sign = sign          # 折叠图标，叶节点为 None
-        self.parent: TinUITreeItem|None = parent
+        self.parent: weakref.ref[TinUITreeItem]|None = weakref.ref(parent) if parent else None
         self.children: list[TinUITreeItem] = []
+
+        self.checkable = False  # 是否可选中，直接影响子节点的可选状态
+        self.check_state = 0  # 选中状态：0=未选，1=全选，2=半选
+        self.checkitems = (None,None,None)  # 可选状态图标的画布 id (outline, fill, text)
+
+        self.icon: str|tk.PhotoImage|None = None  # 可选图标，Segoe Fluent Icons 字体的字符，或 PhotoImage 对象
 
     def __repr__(self):
         return f"TinUITreeItem({self.text!r}, children={len(self.children)})"
@@ -53,6 +60,11 @@ tvdark = {
 class TinUITreeView:
     _ICON_OPEN   = "\ue96e"
     _ICON_CLOSED = "\ue970"
+
+    _ICON_CHECKOUTL = "\ue739"
+    _ICON_CHECKFILL = "\ue73b"
+    _ICON_CHECKHALF = "\uE73C"
+    _ICON_CHECKTICK = "\ue73e"
 
     def __init__(
         self,
@@ -92,6 +104,8 @@ class TinUITreeView:
         _font = tkfont.Font(font=font)
         self._font      = _font
         self._font_size = _font.cget("size")
+        self._icon_font = f"{{Segoe Fluent Icons}} {self._font_size}"
+        self._icon_width = self._font.measure(self._ICON_OPEN)
 
         self._nowitem: TinUITreeItem|None = None # 当前选中节点
         self._roots: list[TinUITreeItem] = [] # 根节点列表
@@ -170,6 +184,8 @@ class TinUITreeView:
         self,
         text: str,
         parent: TinUITreeItem|None = None,
+        checkable: bool = False,
+        check_state: bool = False,
     ) -> TinUITreeItem:
         """
         添加一个新节点。
@@ -182,12 +198,15 @@ class TinUITreeView:
 
         if parent is None:
             # 根级：直接追加到画布末尾，insert_after=None
-            item = self._create_leaf(text, padx, parent, insert_after=None)
+            item = self._create_leaf(text, padx, parent, checkable, check_state, insert_after=None)
             self._roots.append(item)
         else:
+            if parent.checkable:
+                checkable = True
+                check_state = parent.check_state == 1
             # 找到父节点子树中最后一个节点，新节点插入其正下方
             last_node = self._get_last_node(parent)
-            item = self._create_leaf(text, padx, parent, insert_after=last_node)
+            item = self._create_leaf(text, padx, parent, checkable, check_state, insert_after=last_node)
             self._make_parent_expandable(parent)
             parent.children.append(item)
 
@@ -227,7 +246,7 @@ class TinUITreeView:
                     self._box.move(cid, 0, -total_h)
 
         # 修正父节点
-        parent = item.parent
+        parent = item.parent() if item.parent is not None else None
         if parent is not None:
             parent.children = [c for c in parent.children if c is not item]
             if not parent.children:
@@ -266,6 +285,10 @@ class TinUITreeView:
     def unbind(self, sequence, funcid=None):
         """解绑事件，代理给画布实现"""
         self._box.unbind(sequence, funcid)
+    
+    def check_change(self, item: TinUITreeItem, state=None):
+        """外部接口：切换节点选中状态，支持 True/False/2('half')/None(取反)"""
+        self._check_change(item, state)
 
     # ====================
     # 初始化加载
@@ -330,6 +353,7 @@ class TinUITreeView:
         self._order_list.insert(insert_index, back)
 
     def _create_leaf(self, text: str, padx: int, parent,
+                     checkable: bool = False, check_state: bool = False,
                      insert_after: TinUITreeItem|None = None) -> TinUITreeItem:
         y, insert_index = self._calc_insert_y(insert_after)
         te = self._box.create_text(
@@ -339,6 +363,8 @@ class TinUITreeView:
         back = self._box.add_back((), (te,), fg=self._bg, bg=self._bg)
         item = TinUITreeItem(text, back, te, sign=None, parent=parent)
         self._insert_into_map(back, item, insert_index)
+        if checkable:
+            self._add_check(item, checkable, check_state)
         return item
 
     def _create_branch(self, text: str, padx: int, parent,
@@ -346,7 +372,7 @@ class TinUITreeView:
         y, insert_index = self._calc_insert_y(insert_after)
         sign = self._box.create_text(
             (padx - self.scale_value(1), y + self.scale_value(3)), text=self._ICON_OPEN,
-            font=f"{{Segoe Fluent Icons}} {self._font_size}",
+            font=self._icon_font,
             fill=self._signcolor, anchor="nw",
         )
         signx = self._box.bbox(sign)[2]
@@ -442,7 +468,7 @@ class TinUITreeView:
             node = item
             while node is not None:
                 path.append(node)
-                node = node.parent
+                node = node.parent() if node.parent is not None else None
             self._command(path[::-1])
 
     def _bind_events(self, item: TinUITreeItem):
@@ -483,12 +509,12 @@ class TinUITreeView:
         node = parent
         while node is not None:
             depth += 1
-            node = node.parent
-        return 5 + depth * 15
+            node = node.parent() if node.parent is not None else None
+        return 5 + depth * self.scale_value(15)
 
     def _canvas_ids(self, item: TinUITreeItem):
         """返回节点关联的所有画布 id（背景、文字、图标）"""
-        ids = [item.back, item.te]
+        ids = [item.back, item.te, *(item.checkitems if item.checkable else ())]
         if item.sign is not None:
             ids.append(item.sign)
         return ids
@@ -541,11 +567,11 @@ class TinUITreeView:
             return  # 已有图标
         # 获取父节点文字的当前坐标
         te_coords = self._box.coords(parent.te)
-        padx = self._calc_padx(parent.parent)  # 图标在文字左侧
+        padx = self._calc_padx(parent.parent() if parent.parent is not None else None)  # 图标在文字左侧
         y = te_coords[1] + self.scale_value(3)
         sign = self._box.create_text(
             (padx - self.scale_value(1), y), text=self._ICON_OPEN,
-            font=f"{{Segoe Fluent Icons}} {self._font_size}",
+            font=self._icon_font,
             fill=self._signcolor, anchor="nw",
         )
         parent.sign = sign
@@ -561,6 +587,99 @@ class TinUITreeView:
             return
         self._box.delete(parent.sign)
         parent.sign = None
+    
+    def _add_check(self, item: TinUITreeItem, checkable: bool, check_state: bool):
+        """为节点添加可选状态"""
+        item.checkable = checkable
+        item.check_state = self._normalize_check_state(check_state)
+        checkoutl = self._box.create_text(
+            (0, 0), text=self._ICON_CHECKOUTL,
+            font=self._icon_font, fill=self._signcolor,
+        )
+        checkfill = self._box.create_text(
+            (0, 0), text=self._ICON_CHECKFILL,
+            font=self._icon_font, fill="",
+        )
+        checktext = self._box.create_text(
+            (0, 0), text=self._ICON_CHECKTICK,
+            font=self._icon_font, fill="",
+        )
+        item.checkitems = (checkoutl, checkfill, checktext)
+        bbox = self._box.bbox(item.te)
+        pos = (bbox[0] + self._icon_width / 2 + self.scale_value(1), (bbox[1] + bbox[3]) / 2)
+        self._box.coords(checkoutl, pos)
+        self._box.coords(checkfill, pos)
+        self._box.coords(checktext, pos)
+        self._apply_check_visual(item)
+        self._box.move(item.te, self._icon_width + self.scale_value(2), 0)
+        for cid in item.checkitems:
+            self._box.tag_bind(cid, "<Button-1>", lambda _: self._check_change(item))
+
+    def _normalize_check_state(self, state) -> int:
+        """规范化状态：0=未选，1=全选，2=半选。"""
+        if state in (2, "half", "partial"):
+            return 2
+        if state in (True, 1, "checked"):
+            return 1
+        return 0
+
+    def _apply_check_visual(self, item: TinUITreeItem):
+        """按三态刷新节点勾选图标。"""
+        state = item.check_state
+        if state == 1:
+            line_color = ""
+            fill_color = self._oncolor
+            text = self._ICON_CHECKTICK
+            text_color = self._bg
+        elif state == 2:
+            line_color = ""
+            fill_color = self._oncolor
+            text = self._ICON_CHECKHALF
+            text_color = self._bg
+        else:
+            line_color = self._signcolor
+            fill_color = ""
+            text = ""
+            text_color = ""
+        self._box.itemconfig(item.checkitems[0], fill=line_color)
+        self._box.itemconfig(item.checkitems[1], fill=fill_color)
+        self._box.itemconfig(item.checkitems[2], fill=text_color, text=text)
+
+    def _check_change(self, item: TinUITreeItem, state=None, need_update_parent=True):
+        """切换节点选中状态（三态），并按需同步子孙与父级状态。"""
+        if not item.checkable:
+            return
+
+        if state is None:
+            # 交互切换：半选视为未完成，下一次切到全选
+            item.check_state = 0 if item.check_state == 1 else 1
+        else:
+            item.check_state = self._normalize_check_state(state)
+
+        self._apply_check_visual(item)
+
+        # 级联更新子节点状态：仅全选/未选向下传播，半选由子节点聚合得出
+        if item.check_state in (0, 1):
+            for child in item.children:
+                if child.checkable:
+                    self._check_change(child, state=item.check_state, need_update_parent=False)
+
+        # 向上传递
+        if not need_update_parent:
+            return
+        parent = item.parent() if item.parent is not None else None
+        while parent is not None:
+            if parent.checkable:
+                child_states = [c.check_state for c in parent.children if c.checkable]
+                if child_states:
+                    if all(s == 1 for s in child_states):
+                        parent.check_state = 1
+                    elif any(s != 0 for s in child_states):
+                        parent.check_state = 2
+                    else:
+                        parent.check_state = 0
+                    self._apply_check_visual(parent)
+            parent = parent.parent() if parent and parent.parent is not None else None
 
     # ====================
     # 内部滚动 / 布局
@@ -642,7 +761,7 @@ if __name__ == "__main__":
     tree = TinUITreeView(tinui, (50, 50), command=test, **tvdark)
 
     # 增
-    new_item = tree.add_node("新节点") # 添加到根
+    new_item = tree.add_node("新节点", checkable=True) # 添加到根
     child = tree.add_node("子节点", parent=new_item)  # 添加到指定节点下
     for i in range(5):
         tree.add_node(f"子节点{i}", parent=child)

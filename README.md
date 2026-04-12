@@ -14,8 +14,11 @@
 - back - 背景矩形画布 id（也是 items 字典的键）
 - te - 文字画布 id
 - sign - 展开/收起三角图标画布 id（叶节点为 None）
-- parent - 父 TinUITreeItem，根节点为 None
+- parent - 亲节点的弱引用`ReferenceType[TinUITreeItem]`，根节点为 None
 - children  - 子 TinUITreeItem 列表
+- checkable - 是否为可选值
+- check_state - 值选中状态：0=未选，1=全选，2=半选
+- checkitems - (outline, fill, text)，均为文本元素
 
 不过，使用者并不需要在意这些细节，只需要知道这是节点元素即可。以上信息可作为属性直接获取。
 
@@ -59,12 +62,24 @@ TinUITreeView(
 
 返回选中的`TinUITreeItem`。
 
-#### add_node(text:str, parent:TinUITreeItem=None)
+#### add_node
+
+```python
+def add_node(
+    self,
+    text: str,
+    parent: TinUITreeItem|None = None,
+    checkable: bool = False,
+    check_state: bool = False,
+) -> TinUITreeItem:
+```
 
 添加节点。
 
 - parent=None -> 追加到根级
 - parent=item -> 作为 item 的子节点追加
+- checkable - 是否值可选
+- check_state - 是否值选中
 
 返回新建的`TinUITreeItem`。
 
@@ -79,6 +94,12 @@ TinUITreeView(
 #### closs_all() / open_all()
 
 同原生`treeview`。
+
+#### check_change(item: TinUITreeItem, state=None)
+
+更改item的值选状态。
+
+状态直接传递传递给子节点，可能会影响亲节点的值选状态。
 
 #### bind(sequence=None, func=None, add=None)
 
@@ -104,11 +125,11 @@ tinui.pack(fill='both',expand=True)
 tree = TinUITreeView(tinui, (50, 50), command=test)
 
 # 增
-new_item = tree.add_node("新节点") # 添加到根
+new_item = tree.add_node("新节点", checkable=True) # 添加到根
 child = tree.add_node("子节点", parent=new_item)  # 添加到指定节点下
 
 # 删
-# tree.remove_node(child) # 同时删除所有后代，父节点若变为空则自动降级为叶节点
+tree.remove_node(child) # 同时删除所有后代，父节点若变为空则自动降级为叶节点
 
 # 改
 tree.rename_node(new_item, "renamed")
