@@ -10,6 +10,7 @@ TinUITreeView — 基于原 add_treeview 重构的面向对象树状列表控件
 """
 import tkinter as tk
 import tkinter.font as tkfont
+from typing import List
 import weakref
 from tinui import BasicTinUI
 from tinui.TinUI import TinUIString
@@ -179,6 +180,23 @@ class TinUITreeView:
     def get_selected(self) -> TinUITreeItem|None:
         """返回当前选中节点"""
         return self._nowitem
+
+    def select_node(self, values:List[str]) -> bool:
+        """根据路径选择节点，路径格式为 [root_text, child_text, ...]"""
+        current_level = self._roots
+        selected_item = None
+        for value in values:
+            for item in current_level:
+                if item.text == value:
+                    selected_item = item
+                    current_level = item.children
+                    if item.sign: # 自动展开父节点以显示子节点
+                        self._open_view(item)
+                    break
+            else:
+                return False # 未找到匹配项，退出
+        self._click(selected_item, send=True)
+        return True
 
     def add_node(
         self,
@@ -748,15 +766,15 @@ class TinUITreeView:
 
 if __name__ == "__main__":
     from tinui import ExpandPanel
-    # from ctypes import windll
-    # windll.shcore.SetProcessDpiAwareness(2)  # DPI感知，解决高DPI显示模糊问题
-    # factor = windll.shcore.GetScaleFactorForDevice(0) / 100
+    from ctypes import windll
+    windll.shcore.SetProcessDpiAwareness(2)  # DPI感知，解决高DPI显示模糊问题
+    factor = windll.shcore.GetScaleFactorForDevice(0) / 100
     def test(path: list[TinUITreeItem]):
         print("选中路径:", " > ".join(n.text for n in path))
 
     root = tk.Tk()
     tinui = BasicTinUI(root)
-    # tinui.set_scale(factor)
+    tinui.set_scale(factor)
     tinui.pack(fill='both',expand=True)
     tree = TinUITreeView(tinui, (50, 50), command=test, **tvdark)
 
@@ -784,7 +802,8 @@ if __name__ == "__main__":
     
     # 展开/折叠
     tree.close_all()
-    root.after(2000, tree.open_all) # 2秒后展开所有节点
+    tree.select_node(["one", "2"]) # 根据路径选择节点，自动展开父节点
+    # root.after(2000, tree.open_all) # 2秒后展开所有节点
 
     rp = ExpandPanel(tinui, tree.uid, (10,10,10,10))
     def on_resize(e):

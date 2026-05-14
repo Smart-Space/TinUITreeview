@@ -62,6 +62,17 @@ TinUITreeView(
 
 返回选中的`TinUITreeItem`。
 
+#### select_node
+```python
+def select_node(self, values:List[str]) -> bool:
+```
+
+选择节点。
+
+- values - 以文本形式描述选择节点的路径
+
+最终选到则返回`true`。途中所有可选中节点均会被展开。
+
 #### add_node
 
 ```python
