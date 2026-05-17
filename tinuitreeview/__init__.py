@@ -196,6 +196,8 @@ class TinUITreeView:
             else:
                 return False # 未找到匹配项，退出
         self._click(selected_item, send=True)
+        y = self._box.coords(selected_item.back)[1] # 获取目标节点的 y 坐标用于居中显示
+        self._box.yview_moveto(max(0, y - self._height / 2) / self._endy())
         return True
 
     def add_node(
@@ -802,7 +804,7 @@ if __name__ == "__main__":
     
     # 展开/折叠
     tree.close_all()
-    tree.select_node(["one", "2"]) # 根据路径选择节点，自动展开父节点
+    tree.select_node(["three", "b", "b1"]) # 根据路径选择节点，自动展开父节点
     # root.after(2000, tree.open_all) # 2秒后展开所有节点
 
     rp = ExpandPanel(tinui, tree.uid, (10,10,10,10))
