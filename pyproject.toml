@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tinuitreeview"
-version = "1.4.1"
+version = "1.4.2"
 description = "tinui高级树状图"
 readme = "README.md"
 license = "Apache-2.0"

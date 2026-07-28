@@ -124,12 +124,12 @@ class TinUITreeView:
         master.addtag_withtag(self.uid, self._cavui)
 
         self._hscroll = master.add_scrollbar(
-            (pos[0] + width - 8, pos[1]),
+            (pos[0] + width - self.scale_value(8), pos[1]),
             widget=self._box, height=height,
             bg=bg, color=signcolor, oncolor=signcolor,
         )[-1]
         self._vscroll = master.add_scrollbar(
-            (pos[0], pos[1] + height - 8),
+            (pos[0], pos[1] + height - self.scale_value(8)),
             widget=self._box, height=width,
             direction="x",
             bg=bg, color=signcolor, oncolor=signcolor,
